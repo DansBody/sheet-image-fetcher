@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { collectImageCandidates, extractImageReferencesFromText } from './server.js';
+import { collectImageCandidates, extractImageReferencesFromText, isSerialJpgUrl } from './server.js';
 
 test('extracts deeply nested image URLs from attributes, scripts, styles, and query params', () => {
   const html = `
@@ -38,4 +38,22 @@ test('normalizes escaped image URLs in arbitrary text', () => {
   const refs = extractImageReferencesFromText('{"src":"https:\\/\\/images.example.com\\/a\\/photo.webp?width=900"}');
 
   assert.deepEqual(refs, ['https://images.example.com/a/photo.webp?width=900']);
+});
+
+test('detects serial jpg filenames used by gallery pages', () => {
+  assert.equal(isSerialJpgUrl('https://cdn.example.com/gallery/1-7n4407f60e.jpg'), true);
+  assert.equal(isSerialJpgUrl('https://cdn.example.com/gallery/24-5a4406f60e.jpg?width=1200'), true);
+  assert.equal(isSerialJpgUrl('https://cdn.example.com/gallery/image-24.jpg'), false);
+  assert.equal(isSerialJpgUrl('https://cdn.example.com/gallery/24-5a4406f60e.png'), false);
+});
+
+test('marks and boosts serial jpg candidates', () => {
+  const html = `
+    <img src="https://cdn.example.com/assets/logo.png">
+    <img src="https://cdn.example.com/gallery/24-5a4406f60e.jpg">
+  `;
+  const candidates = collectImageCandidates(html, 'https://example.com/');
+
+  assert.equal(candidates[0].url, 'https://cdn.example.com/gallery/24-5a4406f60e.jpg');
+  assert.equal(candidates[0].serialJpg, true);
 });

@@ -140,7 +140,14 @@ h1 {
 
 .toolbar-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
+  justify-content: flex-end;
+}
+
+.toolbar-actions button.is-active {
+  background: var(--ink);
+  color: #ffffff;
 }
 
 .muted {
@@ -179,6 +186,10 @@ h1 {
 .image-card:has(input:checked) {
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(13, 122, 95, 0.2);
+}
+
+.image-card.is-hidden {
+  display: none;
 }
 
 .thumb {
