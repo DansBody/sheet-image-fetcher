@@ -367,7 +367,7 @@ async function fetchRenderedPage(url) {
     page.on('request', (request) => {
       const requestUrl = request.url();
       if (request.resourceType() === 'image' || isLikelyUsefulImageUrl(requestUrl)) {
-        addCapturedUrl(requestUrl, page.url());
+        addCapturedUrl(requestUrl, requestFrameUrl(request, page));
       }
     });
 
@@ -379,7 +379,7 @@ async function fetchRenderedPage(url) {
       const contentLength = Number(headers['content-length'] || 0);
 
       if (contentType.startsWith('image/') || isLikelyUsefulImageUrl(responseUrl)) {
-        addCapturedUrl(responseUrl, page.url());
+        addCapturedUrl(responseUrl, requestFrameUrl(response.request(), page));
         return;
       }
 
@@ -402,10 +402,7 @@ async function fetchRenderedPage(url) {
       }
     });
 
-    await page.goto(url, {
-      timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
-      waitUntil: 'domcontentloaded',
-    });
+    await navigateBrowserPage(page, url);
     await waitForBrowserSettled(page);
 
     for (let index = 0; index < BROWSER_SCROLL_STEPS; index += 1) {
@@ -423,7 +420,7 @@ async function fetchRenderedPage(url) {
     await collectDomImageUrls(page, addCapturedUrl);
 
     const finalUrl = page.url();
-    const renderedHtml = await page.content();
+    const renderedHtml = await collectRenderedHtml(page);
     const capturedMarkup = [...capturedUrls]
       .map((imageUrl) => `<img src="${escapeHtml(imageUrl)}" data-browser-captured="true">`)
       .join('');
@@ -442,14 +439,41 @@ async function fetchRenderedPage(url) {
   }
 }
 
+async function navigateBrowserPage(page, url) {
+  try {
+    await page.goto(url, {
+      timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
+      waitUntil: 'commit',
+    });
+  } catch (error) {
+    if (!/Timeout/i.test(error.message)) {
+      throw error;
+    }
+
+    // Some heavy viewer pages never reach DOMContentLoaded under automation, but
+    // still expose useful network requests and partial DOM after the first commit.
+    if (page.url() === 'about:blank') {
+      throw error;
+    }
+  }
+
+  await page.waitForLoadState('domcontentloaded', { timeout: 8_000 }).catch(() => {});
+}
+
 async function waitForBrowserSettled(page) {
   await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
   await page.waitForTimeout(BROWSER_SCROLL_WAIT_MS);
 }
 
 async function collectDomImageUrls(page, addCapturedUrl) {
-  const pageUrl = page.url();
-  const urls = await page.evaluate(() => {
+  for (const frame of page.frames()) {
+    await collectFrameImageUrls(frame, addCapturedUrl);
+  }
+}
+
+async function collectFrameImageUrls(frame, addCapturedUrl) {
+  const pageUrl = frame.url();
+  const urls = await frame.evaluate(() => {
     const found = new Set();
 
     const add = (value) => {
@@ -502,10 +526,32 @@ async function collectDomImageUrls(page, addCapturedUrl) {
     });
 
     return [...found];
-  });
+  }).catch(() => []);
 
   for (const rawUrl of urls) {
     addCapturedUrl(rawUrl, pageUrl);
+  }
+}
+
+async function collectRenderedHtml(page) {
+  const htmlParts = [];
+
+  for (const frame of page.frames()) {
+    try {
+      htmlParts.push(await frame.content());
+    } catch {
+      // Cross-origin or detached frames can disappear while scrolling.
+    }
+  }
+
+  return htmlParts.join('\n');
+}
+
+function requestFrameUrl(request, page) {
+  try {
+    return request.frame().url() || page.url();
+  } catch {
+    return page.url();
   }
 }
 
