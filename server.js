@@ -47,23 +47,48 @@ app.use(
 app.get('/', (req, res) => {
   res.type('html').send(
     renderPage({
-      title: '圖片擷取器',
+      title: 'Score Snap',
       body: `
-        <section class="hero">
-          <div>
-            <p class="eyebrow">iPhone Shortcut Image Fetcher</p>
-            <h1>貼上網頁 URL，挑選要下載的圖片</h1>
-            <p class="lead">適合搭配 iPhone 捷徑使用：捷徑讀取剪貼簿後開啟這個服務，接著在手機上勾選需要的圖片並下載 ZIP。</p>
-          </div>
-        </section>
+        <header class="app-header">
+          <a class="app-logo" href="/">
+            <span class="logo-icon">♪</span>
+            <span class="logo-text">
+              <span class="logo-name">SCORE SNAP</span>
+              <span class="logo-tagline">SHEET MUSIC EXTRACTOR</span>
+            </span>
+          </a>
+        </header>
 
-        <form class="url-form" method="get" action="/select">
-          <label for="url">網頁 URL</label>
-          <div class="url-row">
-            <input id="url" name="url" type="url" inputmode="url" autocomplete="url" placeholder="https://example.com/page" required>
-            <button type="submit">搜尋圖片</button>
+        <div class="loading-overlay" id="loading-overlay" aria-hidden="true">
+          <div class="spinner"></div>
+          <div class="loading-label">Searching for images…</div>
+        </div>
+
+        <div class="home-shell">
+          <div class="hero-card">
+            <span class="hero-deco hero-deco-l" aria-hidden="true">𝄞</span>
+            <span class="hero-deco hero-deco-r" aria-hidden="true">♩</span>
+            <div class="hero-content">
+              <img class="hero-mascot" src="/machi_sheet.png" alt="Machi the sheet music cat">
+              <h1 class="hero-title">Paste a URL,<br>capture sheet music fast</h1>
+              <p class="hero-lead">Extract, preview, and download sheet music images from any webpage.</p>
+
+              <form class="url-form" method="get" action="/select">
+                <div class="url-row">
+                  <span class="url-icon" aria-hidden="true">🔗</span>
+                  <input id="url" name="url" type="url" inputmode="url" autocomplete="url"
+                    placeholder="Paste a webpage URL, e.g. https://example.com/page" required>
+                  <button type="submit">Search Images</button>
+                </div>
+              </form>
+
+              <p class="privacy-note">
+                <span aria-hidden="true">🔒</span>
+                Your data is safe. We don't store or share your URLs or files.
+              </p>
+            </div>
           </div>
-        </form>
+        </div>
       `,
     }),
   );
@@ -102,7 +127,7 @@ app.get('/select', async (req, res) => {
 
     res.type('html').send(
       renderPage({
-        title: '選擇圖片',
+        title: 'Select Images',
         body: renderSelectionPage(selectedFinalUrl, candidates, {
           browserAttempted,
           browserEnabled: BROWSER_FETCH_ENABLED,
@@ -116,7 +141,7 @@ app.get('/select', async (req, res) => {
   } catch (error) {
     res.status(400).type('html').send(
       renderPage({
-        title: '無法擷取圖片',
+        title: 'Error — Score Snap',
         body: renderError(error.message, inputUrl),
       }),
     );
@@ -151,8 +176,8 @@ app.post('/download', async (req, res) => {
   if (selectedImages.length === 0) {
     res.status(400).type('html').send(
       renderPage({
-        title: '尚未選擇圖片',
-        body: renderError('請至少勾選一張圖片。', pageUrlInput),
+        title: 'Error — Score Snap',
+        body: renderError('Please select at least one image.', pageUrlInput),
       }),
     );
     return;
@@ -161,8 +186,8 @@ app.post('/download', async (req, res) => {
   if (selectedImages.length > MAX_SELECTED) {
     res.status(400).type('html').send(
       renderPage({
-        title: '選取太多圖片',
-        body: renderError(`一次最多下載 ${MAX_SELECTED} 張圖片。`, pageUrlInput),
+        title: 'Error — Score Snap',
+        body: renderError(`You can download a maximum of ${MAX_SELECTED} images at once.`, pageUrlInput),
       }),
     );
     return;
@@ -231,7 +256,7 @@ app.post('/download', async (req, res) => {
   } catch (error) {
     res.status(400).type('html').send(
       renderPage({
-        title: '無法下載圖片',
+        title: 'Error — Score Snap',
         body: renderError(error.message, pageUrlInput),
       }),
     );
@@ -1142,70 +1167,94 @@ function renderSelectionPage(pageUrl, candidates, browserState = {}) {
   const targetGalleryJpgCount = candidates.filter((candidate) => candidate.targetGalleryJpg).length;
   const serialJpgCount = candidates.filter((candidate) => candidate.serialJpg).length;
   const browserStatus = renderBrowserStatus(pageUrl, browserState);
-  const targetCandidates = candidates.filter((c) => c.targetGalleryJpg);
-  const otherCandidates = candidates.filter((c) => !c.targetGalleryJpg);
 
-  const renderCard = (candidate, index) => `
-    <label class="image-card" data-serial-jpg="${candidate.serialJpg ? 'true' : 'false'}" data-target-gallery-jpg="${candidate.targetGalleryJpg ? 'true' : 'false'}">
-      <input type="checkbox" name="images" value="${escapeHtml(candidate.url)}">
-      <span class="thumb">
-        <img loading="lazy" src="/proxy?url=${encodeURIComponent(candidate.url)}&ref=${encodeURIComponent(pageUrl)}" alt="${escapeHtml(candidate.alt || '圖片預覽')}">
-      </span>
-      <span class="meta">
-        <span class="source">${escapeHtml(candidate.targetGalleryJpg ? '目標圖片' : candidate.serialJpg ? '序號 JPG' : sourceLabel(candidate.source))}</span>
-        <span class="index">#${(candidate.serialJpg || candidate.targetGalleryJpg) && candidate.serialNumber != null ? candidate.serialNumber : index + 1}</span>
-      </span>
-      <span class="url" title="${escapeHtml(candidate.url)}">${escapeHtml(trimUrl(candidate.url))}</span>
-    </label>
-  `;
+  const renderCard = (candidate, index) => {
+    const displayNum =
+      (candidate.serialJpg || candidate.targetGalleryJpg) && candidate.serialNumber != null
+        ? candidate.serialNumber
+        : index + 1;
+    const fmt = getImageFormat(candidate.url);
+    const dims = candidate.width && candidate.height ? `${candidate.width} × ${candidate.height}` : '';
+    const metaParts = [dims, fmt].filter(Boolean).join(' · ');
+
+    const proxySrc = `/proxy?url=${encodeURIComponent(candidate.url)}&ref=${encodeURIComponent(pageUrl)}`;
+    return `
+      <label class="image-card"
+        data-serial-jpg="${candidate.serialJpg ? 'true' : 'false'}"
+        data-target-gallery-jpg="${candidate.targetGalleryJpg ? 'true' : 'false'}">
+        <input type="checkbox" name="images" value="${escapeHtml(candidate.url)}">
+        <button type="button" class="zoom-btn" data-zoom-src="${proxySrc}" aria-label="Preview image">
+          <svg width="13" height="13" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M10 6.5C10 8.433 8.433 10 6.5 10C4.567 10 3 8.433 3 6.5C3 4.567 4.567 3 6.5 3C8.433 3 10 4.567 10 6.5ZM9.33565 10.0197C8.56477 10.6439 7.57597 11 6.5 11C4.01472 11 2 8.98528 2 6.5C2 4.01472 4.01472 2 6.5 2C8.98528 2 11 4.01472 11 6.5C11 7.57597 10.6439 8.56477 10.0197 9.33565L12.8536 12.1464C13.0488 12.3417 13.0488 12.6583 12.8536 12.8536C12.6583 13.0488 12.3417 13.0488 12.1464 12.8536L9.33565 10.0197Z" fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"/></svg>
+        </button>
+        <span class="thumb">
+          <img loading="lazy" src="${proxySrc}" alt="${escapeHtml(candidate.alt || 'Image preview')}">
+        </span>
+        <span class="card-label">Image #${displayNum}</span>
+        ${metaParts ? `<span class="card-meta">${escapeHtml(metaParts)}</span>` : ''}
+      </label>
+    `;
+  };
 
   const candidateMarkup =
     candidates.length === 0
-      ? `<div class="empty">沒有找到可下載的圖片候選。這個頁面可能由 JavaScript 動態載入圖片，或圖片來源被網站阻擋。</div>`
+      ? `<div class="empty-state">No downloadable images found on this page. The page may load images dynamically with JavaScript, or the source site may be blocking access.</div>`
       : `
-        <div class="toolbar">
-          <div>
-            <strong data-visible-count>${candidates.length}</strong> / ${candidates.length} 張候選圖片
-            <span class="muted">目標圖片 ${targetGalleryJpgCount} 張，序號 JPG ${serialJpgCount} 張。最多顯示 ${MAX_CANDIDATES} 張，一次最多下載 ${MAX_SELECTED} 張。</span>
-          </div>
-          <div class="toolbar-actions">
-            <button type="button" data-filter="all" aria-pressed="true">全部</button>
-            <button type="button" data-filter="target">只看目標圖片</button>
-            <button type="button" data-filter="serial">只看序號 JPG</button>
-            <button type="button" data-filter="checked">只看已勾選</button>
-            <button type="button" data-select-all>全選</button>
-            <button type="button" data-clear>清除</button>
-          </div>
+        <div class="filter-bar" role="toolbar" aria-label="Filter images">
+          <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">
+            All <span class="chip-count">${candidates.length}</span>
+          </button>
+          <button class="filter-chip" type="button" data-filter="target">
+            Target Images <span class="chip-count">${targetGalleryJpgCount}</span>
+          </button>
+          <button class="filter-chip" type="button" data-filter="serial">
+            Original JPG <span class="chip-count">${serialJpgCount}</span>
+          </button>
+          <div class="filter-sep" role="separator"></div>
+          <button class="filter-chip" type="button" data-filter="checked">
+            Selected <span class="chip-count chip-selected-count">0</span>
+          </button>
         </div>
 
         <form method="post" action="/download">
           <input type="hidden" name="pageUrl" value="${escapeHtml(pageUrl)}">
-          <div class="filter-empty is-hidden" data-filter-empty>目前篩選沒有符合的圖片。這表示目標圖片 URL 沒有被後端從這個頁面的 HTML / script / style 中抓到。</div>
-          <div class="grid">
-            ${targetCandidates.map((c, i) => renderCard(c, i)).join('')}
+          <div class="filter-empty is-hidden" data-filter-empty>
+            No images match this filter.
           </div>
-          ${otherCandidates.length > 0 ? `
-            <details class="other-images">
-              <summary>其他圖片（${otherCandidates.length} 張）</summary>
-              <div class="grid">
-                ${otherCandidates.map((c, i) => renderCard(c, targetCandidates.length + i)).join('')}
-              </div>
-            </details>
-          ` : ''}
-          <div class="sticky-actions">
-            <button type="submit">下載勾選圖片 ZIP</button>
+          <div class="grid">
+            ${candidates.map((c, i) => renderCard(c, i)).join('')}
+          </div>
+          <div class="sticky-bar">
+            <div class="sticky-bar-info">
+              <div class="sticky-bar-count"><span data-selected-count>0</span> images selected</div>
+            </div>
+            <button type="button" class="sticky-clear-btn" data-clear>
+              <svg width="14" height="14" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M5.5 1C5.22386 1 5 1.22386 5 1.5C5 1.77614 5.22386 2 5.5 2H9.5C9.77614 2 10 1.77614 10 1.5C10 1.22386 9.77614 1 9.5 1H5.5ZM3 3.5C3 3.22386 3.22386 3 3.5 3H11.5C11.7761 3 12 3.22386 12 3.5C12 3.77614 11.7761 4 11.5 4H3.5C3.22386 4 3 3.77614 3 3.5ZM3.5 5C3.22386 5 3 5.22386 3 5.5C3 5.77614 3.22386 6 3.5 6H4V11.5C4 12.3284 4.67157 13 5.5 13H9.5C10.3284 13 11 12.3284 11 11.5V6H11.5C11.7761 6 12 5.77614 12 5.5C12 5.22386 11.7761 5 11.5 5H3.5ZM5 6H10V11.5C10 11.7761 9.77614 12 9.5 12H5.5C5.22386 12 5 11.7761 5 11.5V6Z" fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"/></svg>
+              Clear Selection
+            </button>
+            <button type="submit" class="sticky-download-btn">
+              <svg width="14" height="14" viewBox="0 0 15 15" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><path d="M7.50005 1.04998C7.22391 1.04998 7.00005 1.27383 7.00005 1.54998V8.41371L5.45361 6.86727C5.25835 6.67201 4.94177 6.67201 4.74651 6.86727C4.55125 7.06253 4.55125 7.37911 4.74651 7.57437L7.14651 9.97437C7.24278 10.0706 7.37135 10.125 7.50005 10.125C7.62875 10.125 7.75732 10.0706 7.85359 9.97437L10.2536 7.57437C10.4488 7.37911 10.4488 7.06253 10.2536 6.86727C10.0583 6.67201 9.74177 6.67201 9.54651 6.86727L8.00005 8.41371V1.54998C8.00005 1.27383 7.77619 1.04998 7.50005 1.04998ZM2.50005 10C2.77619 10 3.00005 10.2239 3.00005 10.5V12C3.00005 12.5523 3.44776 13 4.00005 13H11C11.5523 13 12 12.5523 12 12V10.5C12 10.2239 12.2239 10 12.5 10C12.7762 10 13 10.2239 13 10.5V12C13 13.1046 12.1046 14 11 14H4.00005C2.8955 14 2.00005 13.1046 2.00005 12V10.5C2.00005 10.2239 2.22391 10 2.50005 10Z" fill="currentColor" fill-rule="evenodd" clip-rule="evenodd"/></svg>
+              Download Selected ZIP
+            </button>
           </div>
         </form>
       `;
 
   return `
-    <section class="page-head">
-      <a class="back-link" href="/">重新輸入 URL</a>
-      <h1>選擇要下載的圖片</h1>
-      <p class="source-url">${escapeHtml(pageUrl)}</p>
-    </section>
-    ${browserStatus}
-    ${candidateMarkup}
+    <header class="app-header">
+      <a class="app-logo" href="/">
+        <span class="logo-icon">♪</span>
+        <span class="logo-text">
+          <span class="logo-name">SCORE SNAP</span>
+          <span class="logo-tagline">SHEET MUSIC EXTRACTOR</span>
+        </span>
+      </a>
+      <div class="header-url" title="${escapeHtml(pageUrl)}">${escapeHtml(pageUrl)}</div>
+      <a class="header-action" href="/">↻ Search Again</a>
+    </header>
+    <div class="select-shell">
+      ${browserStatus}
+      ${candidateMarkup}
+    </div>
   `;
 }
 
@@ -1215,64 +1264,56 @@ function renderBrowserStatus(pageUrl, browserState) {
 
   if (browserState.browserUsed) {
     return `
-      <section class="mode-status">
+      <div class="mode-status">
         <div>
-          <strong>已使用瀏覽器模式</strong>
-          <span>已開啟頁面並往下捲動 ${BROWSER_SCROLL_STEPS} 次，額外捕捉 ${browserState.capturedByBrowser || 0} 個圖片 URL。</span>
+          <strong>Browser mode active</strong>
+          <span>Scrolled ${BROWSER_SCROLL_STEPS} times, captured ${browserState.capturedByBrowser || 0} additional image URLs.</span>
         </div>
-        <a href="${staticUrl}">改用 HTML 模式</a>
-      </section>
+        <a href="${staticUrl}">Switch to HTML mode</a>
+      </div>
     `;
   }
 
   if (browserState.browserError) {
     return `
-      <section class="mode-status mode-status-warn">
+      <div class="mode-status mode-status-warn">
         <div>
-          <strong>瀏覽器模式沒有成功</strong>
+          <strong>Browser mode failed</strong>
           <span>${escapeHtml(browserState.browserError)}</span>
         </div>
-        <a href="${browserUrl}">重試瀏覽器模式</a>
-      </section>
-    `;
-  }
-
-  if (!browserState.browserEnabled) {
-    return `
-      <section class="mode-status">
-        <div>
-          <strong>HTML 模式</strong>
-          <span>瀏覽器模式目前已停用。</span>
-        </div>
-      </section>
-    `;
-  }
-
-  return `
-    <section class="mode-status">
-      <div>
-        <strong>HTML 模式</strong>
-        <span>${browserState.browserMode === 'html' ? '目前已手動改用 HTML 模式。' : '如果頁面需要往下捲動才載入圖片，可以改用瀏覽器模式重新擷取。'}</span>
+        <a href="${browserUrl}">Retry browser mode</a>
       </div>
-      <a href="${browserUrl}">用瀏覽器模式重新抓取</a>
-    </section>
-  `;
+    `;
+  }
+
+  return '';
 }
 
 function renderError(message, originalUrl) {
   const retryUrl = originalUrl ? `/?url=${encodeURIComponent(originalUrl)}` : '/';
   return `
-    <section class="message">
-      <h1>處理失敗</h1>
-      <p>${escapeHtml(message)}</p>
-      <a class="button-link" href="${retryUrl}">回首頁</a>
-    </section>
+    <header class="app-header">
+      <a class="app-logo" href="/">
+        <span class="logo-icon">♪</span>
+        <span class="logo-text">
+          <span class="logo-name">SCORE SNAP</span>
+          <span class="logo-tagline">SHEET MUSIC EXTRACTOR</span>
+        </span>
+      </a>
+    </header>
+    <div class="select-shell">
+      <div class="message-card">
+        <h1>Something went wrong</h1>
+        <p>${escapeHtml(message)}</p>
+        <a class="btn-back" href="${retryUrl}">← Go back</a>
+      </div>
+    </div>
   `;
 }
 
 function renderPage({ title, body }) {
   return `<!doctype html>
-<html lang="zh-Hant">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1281,9 +1322,7 @@ function renderPage({ title, body }) {
   <script defer src="/app.js?v=${ASSET_VERSION}"></script>
 </head>
 <body>
-  <main class="shell">
-    ${body}
-  </main>
+  ${body}
 </body>
 </html>`;
 }
@@ -1361,6 +1400,16 @@ function formatBytes(bytes) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${Math.round(bytes / 1024 / 1024)} MB`;
+}
+
+function getImageFormat(url) {
+  try {
+    const ext = path.extname(new URL(url).pathname).replace('.', '').toLowerCase();
+    const map = { jpg: 'JPG', jpeg: 'JPG', png: 'PNG', webp: 'WebP', gif: 'GIF', avif: 'AVIF', svg: 'SVG' };
+    return map[ext] || '';
+  } catch {
+    return '';
+  }
 }
 
 function escapeHtml(value) {

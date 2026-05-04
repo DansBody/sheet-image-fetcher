@@ -1,12 +1,76 @@
+// ── Loading state ────────────────────────────
+const urlForm = document.querySelector('.url-form');
+const loadingOverlay = document.getElementById('loading-overlay');
+
+if (urlForm && loadingOverlay) {
+  urlForm.addEventListener('submit', () => {
+    loadingOverlay.classList.add('is-active');
+    loadingOverlay.removeAttribute('aria-hidden');
+  });
+}
+
+// Reset when navigating back (bfcache)
+window.addEventListener('pageshow', (event) => {
+  if (loadingOverlay) {
+    loadingOverlay.classList.remove('is-active');
+    loadingOverlay.setAttribute('aria-hidden', 'true');
+  }
+});
+
+// ── Lightbox ─────────────────────────────────
+(function () {
+  const lightbox = document.createElement('div');
+  lightbox.className = 'lightbox';
+  lightbox.setAttribute('role', 'dialog');
+  lightbox.setAttribute('aria-modal', 'true');
+  lightbox.setAttribute('aria-label', 'Image preview');
+  lightbox.innerHTML = `
+    <button class="lightbox-close" aria-label="Close preview">✕</button>
+    <img class="lightbox-img" src="" alt="Image preview">
+  `;
+  document.body.appendChild(lightbox);
+
+  const lightboxImg = lightbox.querySelector('.lightbox-img');
+
+  function openLightbox(src) {
+    lightboxImg.src = src;
+    lightbox.classList.add('is-open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeLightbox() {
+    lightbox.classList.remove('is-open');
+    document.body.style.overflow = '';
+    setTimeout(() => { lightboxImg.src = ''; }, 250);
+  }
+
+  lightbox.querySelector('.lightbox-close').addEventListener('click', closeLightbox);
+  lightbox.addEventListener('click', (e) => {
+    if (e.target === lightbox) closeLightbox();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && lightbox.classList.contains('is-open')) closeLightbox();
+  });
+
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.zoom-btn');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openLightbox(btn.dataset.zoomSrc);
+  });
+}());
+
+// ── Filter & selection ───────────────────────
 let activeFilter = 'all';
 
 document.addEventListener('DOMContentLoaded', () => {
   applyFilter();
+  updateSelectedCount();
 });
 
 document.addEventListener('click', (event) => {
   const filter = event.target.closest('[data-filter]');
-  const selectAll = event.target.closest('[data-select-all]');
   const clear = event.target.closest('[data-clear]');
 
   if (filter) {
@@ -15,26 +79,25 @@ document.addEventListener('click', (event) => {
     return;
   }
 
-  if (!selectAll && !clear) {
-    return;
-  }
-
-  const checked = Boolean(selectAll);
-  getVisibleInputs().forEach((input) => {
-    input.checked = checked;
-  });
-
-  if (activeFilter === 'checked') {
-    applyFilter();
+  if (clear) {
+    document.querySelectorAll('input[name="images"]').forEach((input) => {
+      input.checked = false;
+    });
+    updateSelectedCount();
+    if (activeFilter === 'checked') {
+      applyFilter();
+    }
   }
 });
 
 document.addEventListener('change', (event) => {
-  if (!event.target.matches('input[name="images"]') || activeFilter !== 'checked') {
+  if (!event.target.matches('input[name="images"]')) {
     return;
   }
-
-  applyFilter();
+  updateSelectedCount();
+  if (activeFilter === 'checked') {
+    applyFilter();
+  }
 });
 
 function applyFilter() {
@@ -49,21 +112,14 @@ function applyFilter() {
       (activeFilter === 'checked' && checkbox?.checked);
 
     card.classList.toggle('is-hidden', !visible);
-    if (visible) {
-      visibleCount += 1;
-    }
+    if (visible) visibleCount += 1;
   });
 
-  document.querySelectorAll('[data-filter]').forEach((button) => {
-    const active = button.dataset.filter === activeFilter;
-    button.classList.toggle('is-active', active);
-    button.setAttribute('aria-pressed', String(active));
+  document.querySelectorAll('[data-filter]').forEach((btn) => {
+    const active = btn.dataset.filter === activeFilter;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', String(active));
   });
-
-  const count = document.querySelector('[data-visible-count]');
-  if (count) {
-    count.textContent = String(visibleCount);
-  }
 
   const empty = document.querySelector('[data-filter-empty]');
   if (empty) {
@@ -71,6 +127,19 @@ function applyFilter() {
   }
 }
 
-function getVisibleInputs() {
-  return [...document.querySelectorAll('.image-card:not(.is-hidden) input[name="images"]')];
+function updateSelectedCount() {
+  const total = document.querySelectorAll('input[name="images"]:checked').length;
+
+  document.querySelectorAll('[data-selected-count]').forEach((el) => {
+    el.textContent = String(total);
+  });
+
+  document.querySelectorAll('.chip-selected-count').forEach((el) => {
+    el.textContent = String(total);
+  });
+
+  const stickyBar = document.querySelector('.sticky-bar');
+  if (stickyBar) {
+    stickyBar.classList.toggle('is-visible', total > 0);
+  }
 }
