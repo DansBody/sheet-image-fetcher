@@ -3,7 +3,7 @@ services:
     name: sheet-image-fetcher
     runtime: node
     plan: free
-    buildCommand: npm install
+    buildCommand: npm install && npx playwright install --with-deps --only-shell chromium
     startCommand: npm start
     autoDeploy: true
     envVars:

@@ -23,6 +23,11 @@ const MAX_SELECTED = numberFromEnv('MAX_SELECTED', 40);
 const MAX_IMAGE_BYTES = numberFromEnv('MAX_IMAGE_BYTES', 15 * 1024 * 1024);
 const MAX_TOTAL_BYTES = numberFromEnv('MAX_TOTAL_BYTES', 150 * 1024 * 1024);
 const REQUEST_TIMEOUT_MS = numberFromEnv('REQUEST_TIMEOUT_MS', 15_000);
+const BROWSER_FETCH_ENABLED = process.env.BROWSER_FETCH_ENABLED !== 'false';
+const BROWSER_NAVIGATION_TIMEOUT_MS = numberFromEnv('BROWSER_NAVIGATION_TIMEOUT_MS', 30_000);
+const BROWSER_SCROLL_STEPS = numberFromEnv('BROWSER_SCROLL_STEPS', 10);
+const BROWSER_SCROLL_WAIT_MS = numberFromEnv('BROWSER_SCROLL_WAIT_MS', 700);
+const BROWSER_MAX_CAPTURED_URLS = numberFromEnv('BROWSER_MAX_CAPTURED_URLS', 500);
 const ALLOW_PRIVATE_URLS = process.env.ALLOW_PRIVATE_URLS === 'true';
 
 app.disable('x-powered-by');
@@ -65,16 +70,46 @@ app.get('/', (req, res) => {
 
 app.get('/select', async (req, res) => {
   const inputUrl = String(req.query.url || '').trim();
+  const forceBrowser = String(req.query.browser || '') === '1';
 
   try {
     const pageUrl = await normalizeAndCheckUrl(inputUrl, '網頁 URL');
     const { html, finalUrl } = await fetchHtml(pageUrl);
-    const candidates = collectImageCandidates(html, finalUrl).slice(0, MAX_CANDIDATES);
+    let candidates = collectImageCandidates(html, finalUrl);
+    let selectedFinalUrl = finalUrl;
+    let browserAttempted = false;
+    let browserUsed = false;
+    let browserError = '';
+    let capturedByBrowser = 0;
+
+    if (shouldUseBrowserFetch(candidates, forceBrowser)) {
+      browserAttempted = true;
+
+      try {
+        const rendered = await fetchRenderedPage(finalUrl);
+        const renderedCandidates = collectImageCandidates(rendered.html, rendered.finalUrl);
+        candidates = mergeCandidateLists(candidates, renderedCandidates);
+        selectedFinalUrl = rendered.finalUrl;
+        capturedByBrowser = rendered.capturedUrlCount;
+        browserUsed = true;
+      } catch (error) {
+        browserError = error.message;
+      }
+    }
+
+    candidates = candidates.slice(0, MAX_CANDIDATES);
 
     res.type('html').send(
       renderPage({
         title: '選擇圖片',
-        body: renderSelectionPage(finalUrl, candidates),
+        body: renderSelectionPage(selectedFinalUrl, candidates, {
+          browserAttempted,
+          browserEnabled: BROWSER_FETCH_ENABLED,
+          browserError,
+          browserUsed,
+          capturedByBrowser,
+          forceBrowser,
+        }),
       }),
     );
   } catch (error) {
@@ -233,6 +268,254 @@ async function fetchHtml(url) {
     html: buffer.toString('utf8'),
     finalUrl: response.url,
   };
+}
+
+function shouldUseBrowserFetch(candidates, forceBrowser) {
+  if (!BROWSER_FETCH_ENABLED) {
+    return false;
+  }
+
+  if (forceBrowser) {
+    return true;
+  }
+
+  return !candidates.some((candidate) => candidate.targetGalleryJpg || candidate.serialJpg);
+}
+
+async function fetchRenderedPage(url) {
+  const { chromium } = await import('playwright');
+  const capturedUrls = new Set();
+  const requestCheckCache = new Map();
+  let browser;
+
+  const addCapturedUrl = (value, baseUrl = url) => {
+    if (capturedUrls.size >= BROWSER_MAX_CAPTURED_URLS) {
+      return;
+    }
+
+    for (const variant of normalizeTextVariants(value)) {
+      const resolved = resolveImageUrl(variant, baseUrl);
+      if (resolved && isLikelyUsefulImageUrl(resolved)) {
+        capturedUrls.add(resolved);
+      }
+
+      for (const embeddedUrl of extractNestedImageUrls(variant)) {
+        const embeddedResolved = resolveImageUrl(embeddedUrl, baseUrl);
+        if (embeddedResolved && isLikelyUsefulImageUrl(embeddedResolved)) {
+          capturedUrls.add(embeddedResolved);
+        }
+      }
+
+      for (const textUrl of extractImageReferencesFromText(variant)) {
+        const textResolved = resolveImageUrl(textUrl, baseUrl);
+        if (textResolved && isLikelyUsefulImageUrl(textResolved)) {
+          capturedUrls.add(textResolved);
+        }
+      }
+    }
+  };
+
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--disable-dev-shm-usage', '--no-sandbox'],
+    });
+
+    const context = await browser.newContext({
+      deviceScaleFactor: 3,
+      hasTouch: true,
+      isMobile: true,
+      locale: 'zh-TW',
+      userAgent: USER_AGENT,
+      viewport: { width: 390, height: 844 },
+      extraHTTPHeaders: {
+        'accept-language': 'zh-TW,zh;q=0.9,en;q=0.7',
+      },
+    });
+
+    await context.route('**/*', async (route) => {
+      const requestUrl = route.request().url();
+      const allowed = await isAllowedBrowserRequest(requestUrl, requestCheckCache);
+
+      if (!allowed) {
+        await route.abort();
+        return;
+      }
+
+      await route.continue();
+    });
+
+    const page = await context.newPage();
+
+    page.on('request', (request) => {
+      const requestUrl = request.url();
+      if (request.resourceType() === 'image' || isLikelyUsefulImageUrl(requestUrl)) {
+        addCapturedUrl(requestUrl, page.url());
+      }
+    });
+
+    page.on('response', async (response) => {
+      const responseUrl = response.url();
+      const requestType = response.request().resourceType();
+      const headers = response.headers();
+      const contentType = headers['content-type'] || '';
+      const contentLength = Number(headers['content-length'] || 0);
+
+      if (contentType.startsWith('image/') || isLikelyUsefulImageUrl(responseUrl)) {
+        addCapturedUrl(responseUrl, page.url());
+        return;
+      }
+
+      if (!['document', 'fetch', 'script', 'xhr'].includes(requestType)) {
+        return;
+      }
+
+      if (contentLength > HTML_MAX_BYTES) {
+        return;
+      }
+
+      if (!/(html|json|javascript|text|xml)/i.test(contentType)) {
+        return;
+      }
+
+      try {
+        addCapturedUrl(await response.text(), responseUrl);
+      } catch {
+        // Some response bodies are unavailable after the browser consumes them.
+      }
+    });
+
+    await page.goto(url, {
+      timeout: BROWSER_NAVIGATION_TIMEOUT_MS,
+      waitUntil: 'domcontentloaded',
+    });
+    await waitForBrowserSettled(page);
+
+    for (let index = 0; index < BROWSER_SCROLL_STEPS; index += 1) {
+      await collectDomImageUrls(page, addCapturedUrl);
+      await page.evaluate(() => {
+        window.scrollBy(0, Math.max(window.innerHeight * 0.85, 500));
+      });
+      await page.waitForTimeout(BROWSER_SCROLL_WAIT_MS);
+    }
+
+    await page.evaluate(() => {
+      window.scrollTo(0, document.documentElement.scrollHeight || document.body.scrollHeight || 0);
+    });
+    await waitForBrowserSettled(page);
+    await collectDomImageUrls(page, addCapturedUrl);
+
+    const finalUrl = page.url();
+    const renderedHtml = await page.content();
+    const capturedMarkup = [...capturedUrls]
+      .map((imageUrl) => `<img src="${escapeHtml(imageUrl)}" data-browser-captured="true">`)
+      .join('');
+
+    return {
+      capturedUrlCount: capturedUrls.size,
+      finalUrl,
+      html: `${renderedHtml}${capturedMarkup}`,
+    };
+  } catch (error) {
+    throw new Error(`瀏覽器模式失敗：${error.message}`);
+  } finally {
+    if (browser) {
+      await browser.close();
+    }
+  }
+}
+
+async function waitForBrowserSettled(page) {
+  await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => {});
+  await page.waitForTimeout(BROWSER_SCROLL_WAIT_MS);
+}
+
+async function collectDomImageUrls(page, addCapturedUrl) {
+  const pageUrl = page.url();
+  const urls = await page.evaluate(() => {
+    const found = new Set();
+
+    const add = (value) => {
+      if (!value) {
+        return;
+      }
+
+      found.add(String(value));
+    };
+
+    const addUrlLikeValue = (value) => {
+      if (!value) {
+        return;
+      }
+
+      const text = String(value);
+      add(text);
+
+      if (/^(https?:)?\/\//i.test(text) || /^[/.]/.test(text)) {
+        try {
+          add(new URL(text, location.href).href);
+        } catch {
+          add(text);
+        }
+      }
+    };
+
+    document.querySelectorAll('*').forEach((element) => {
+      for (const attr of element.getAttributeNames()) {
+        const value = element.getAttribute(attr);
+        if (/(src|href|url|image|img|poster|thumb|background|data)/i.test(attr) || /\.(jpe?g|png|webp|avif|gif|svg)([?#]|$)/i.test(value || '')) {
+          addUrlLikeValue(value);
+        }
+      }
+
+      const style = window.getComputedStyle(element);
+      add(style.backgroundImage);
+      add(style.content);
+    });
+
+    document.querySelectorAll('img').forEach((image) => {
+      addUrlLikeValue(image.currentSrc);
+      addUrlLikeValue(image.src);
+      add(image.srcset);
+    });
+
+    document.querySelectorAll('source').forEach((source) => {
+      add(source.srcset);
+      addUrlLikeValue(source.src);
+    });
+
+    return [...found];
+  });
+
+  for (const rawUrl of urls) {
+    addCapturedUrl(rawUrl, pageUrl);
+  }
+}
+
+async function isAllowedBrowserRequest(rawUrl, cache) {
+  let url;
+
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    return false;
+  }
+
+  if (!['http:', 'https:'].includes(url.protocol)) {
+    return true;
+  }
+
+  const cacheKey = `${url.protocol}//${url.hostname}`;
+  if (!cache.has(cacheKey)) {
+    cache.set(
+      cacheKey,
+      normalizeAndCheckUrl(url.origin, '瀏覽器請求 URL')
+        .then(() => true)
+        .catch(() => false),
+    );
+  }
+
+  return cache.get(cacheKey);
 }
 
 async function fetchBufferWithLimit(url, { maxBytes, timeoutMs, headers }) {
@@ -529,6 +812,28 @@ function collectImageCandidates(html, pageUrl) {
   return [...candidates.values()].sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
 }
 
+function mergeCandidateLists(...lists) {
+  const candidates = new Map();
+
+  for (const list of lists) {
+    for (const candidate of list) {
+      const current = candidates.get(candidate.url);
+      if (!current || candidate.score > current.score) {
+        candidates.set(candidate.url, candidate);
+        continue;
+      }
+
+      if (!current.alt && candidate.alt) {
+        current.alt = candidate.alt;
+      }
+      current.serialJpg = current.serialJpg || candidate.serialJpg;
+      current.targetGalleryJpg = current.targetGalleryJpg || candidate.targetGalleryJpg;
+    }
+  }
+
+  return [...candidates.values()].sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
+}
+
 function resolveImageUrl(rawUrl, pageUrl) {
   if (!rawUrl) {
     return '';
@@ -554,6 +859,14 @@ function resolveImageUrl(rawUrl, pageUrl) {
   } catch {
     return '';
   }
+}
+
+function isLikelyUsefulImageUrl(value) {
+  return (
+    /\.(?:jpe?g|png|webp|avif|gif|svg)(?:[?#]|$)/i.test(String(value)) ||
+    isSerialJpgUrl(value) ||
+    isTargetGalleryJpgUrl(value)
+  );
 }
 
 function parseSrcset(value) {
@@ -746,9 +1059,10 @@ function isTargetGalleryJpgUrl(value) {
   }
 }
 
-function renderSelectionPage(pageUrl, candidates) {
+function renderSelectionPage(pageUrl, candidates, browserState = {}) {
   const targetGalleryJpgCount = candidates.filter((candidate) => candidate.targetGalleryJpg).length;
   const serialJpgCount = candidates.filter((candidate) => candidate.serialJpg).length;
+  const browserStatus = renderBrowserStatus(pageUrl, browserState);
   const candidateMarkup =
     candidates.length === 0
       ? `<div class="empty">沒有找到可下載的圖片候選。這個頁面可能由 JavaScript 動態載入圖片，或圖片來源被網站阻擋。</div>`
@@ -802,7 +1116,58 @@ function renderSelectionPage(pageUrl, candidates) {
       <h1>選擇要下載的圖片</h1>
       <p class="source-url">${escapeHtml(pageUrl)}</p>
     </section>
+    ${browserStatus}
     ${candidateMarkup}
+  `;
+}
+
+function renderBrowserStatus(pageUrl, browserState) {
+  const browserUrl = `/select?url=${encodeURIComponent(pageUrl)}&browser=1`;
+  const staticUrl = `/select?url=${encodeURIComponent(pageUrl)}`;
+
+  if (browserState.browserUsed) {
+    return `
+      <section class="mode-status">
+        <div>
+          <strong>已使用瀏覽器模式</strong>
+          <span>已開啟頁面並往下捲動 ${BROWSER_SCROLL_STEPS} 次，額外捕捉 ${browserState.capturedByBrowser || 0} 個圖片 URL。</span>
+        </div>
+        <a href="${staticUrl}">改用 HTML 模式</a>
+      </section>
+    `;
+  }
+
+  if (browserState.browserError) {
+    return `
+      <section class="mode-status mode-status-warn">
+        <div>
+          <strong>瀏覽器模式沒有成功</strong>
+          <span>${escapeHtml(browserState.browserError)}</span>
+        </div>
+        <a href="${browserUrl}">重試瀏覽器模式</a>
+      </section>
+    `;
+  }
+
+  if (!browserState.browserEnabled) {
+    return `
+      <section class="mode-status">
+        <div>
+          <strong>HTML 模式</strong>
+          <span>瀏覽器模式目前已停用。</span>
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="mode-status">
+      <div>
+        <strong>HTML 模式</strong>
+        <span>如果頁面需要往下捲動才載入圖片，可以改用瀏覽器模式重新擷取。</span>
+      </div>
+      <a href="${browserUrl}">用瀏覽器模式重新抓取</a>
+    </section>
   `;
 }
 
