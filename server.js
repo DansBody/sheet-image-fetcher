@@ -763,6 +763,7 @@ function collectImageCandidates(html, pageUrl) {
         height: String(height || '').trim(),
         serialJpg: isSerialJpgUrl(resolved),
         targetGalleryJpg: isTargetGalleryJpgUrl(resolved),
+        serialNumber: extractSerialNumber(resolved),
         score,
       });
       return;
@@ -1117,6 +1118,16 @@ function isSerialJpgUrl(value) {
   }
 }
 
+function extractSerialNumber(value) {
+  try {
+    const filename = decodeURIComponent(new URL(value).pathname.split('/').pop() || '');
+    const match = filename.match(/^(\d{1,4})-[a-z0-9]+\.jpe?g$/i);
+    return match ? Number(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
 function isTargetGalleryJpgUrl(value) {
   try {
     const url = new URL(value);
@@ -1164,7 +1175,7 @@ function renderSelectionPage(pageUrl, candidates, browserState = {}) {
                     </span>
                     <span class="meta">
                       <span class="source">${escapeHtml(candidate.targetGalleryJpg ? '目標圖片' : candidate.serialJpg ? '序號 JPG' : sourceLabel(candidate.source))}</span>
-                      <span class="index">#${index + 1}</span>
+                      <span class="index">#${(candidate.serialJpg || candidate.targetGalleryJpg) && candidate.serialNumber != null ? candidate.serialNumber : index + 1}</span>
                     </span>
                     <span class="url" title="${escapeHtml(candidate.url)}">${escapeHtml(trimUrl(candidate.url))}</span>
                   </label>
