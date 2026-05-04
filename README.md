@@ -28,9 +28,10 @@ http://localhost:3000
 1. 把這個專案推到 GitHub。
 2. 到 Render 建立新的 Web Service，連到該 repo。
 3. Render 會讀取 `render.yaml`：
-   - Build Command: `npm install && npx playwright install --only-shell chromium`
+   - Build Command: `PLAYWRIGHT_BROWSERS_PATH=0 npm install && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --only-shell chromium`
    - Start Command: `npm start`
    - Plan: Free
+   - Environment Variable: `PLAYWRIGHT_BROWSERS_PATH=0`
 4. 部署完成後會得到一個像這樣的網址：
 
 ```text

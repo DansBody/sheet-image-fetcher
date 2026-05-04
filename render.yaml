@@ -3,9 +3,11 @@ services:
     name: sheet-image-fetcher
     runtime: node
     plan: free
-    buildCommand: npm install && npx playwright install --only-shell chromium
+    buildCommand: PLAYWRIGHT_BROWSERS_PATH=0 npm install && PLAYWRIGHT_BROWSERS_PATH=0 npx playwright install --only-shell chromium
     startCommand: npm start
     autoDeploy: true
     envVars:
       - key: NODE_VERSION
         value: 22
+      - key: PLAYWRIGHT_BROWSERS_PATH
+        value: "0"
