@@ -192,9 +192,11 @@ app.post('/download', async (req, res) => {
   }
 });
 
-app.listen(port, () => {
-  console.log(`Image fetcher listening on http://localhost:${port}`);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  app.listen(port, () => {
+    console.log(`Image fetcher listening on http://localhost:${port}`);
+  });
+}
 
 function numberFromEnv(name, fallback) {
   const value = Number(process.env[name]);
@@ -390,12 +392,13 @@ function collectImageCandidates(html, pageUrl) {
   const $ = cheerio.load(html);
   const candidates = new Map();
 
-  const push = (rawUrl, source, alt = '', width = '', height = '') => {
+  const pushResolved = (rawUrl, source, alt = '', width = '', height = '') => {
     const resolved = resolveImageUrl(rawUrl, pageUrl);
     if (!resolved) {
       return;
     }
 
+    const score = scoreImage(resolved, source, width, height);
     if (!candidates.has(resolved)) {
       candidates.set(resolved, {
         url: resolved,
@@ -403,14 +406,44 @@ function collectImageCandidates(html, pageUrl) {
         alt: String(alt || '').trim(),
         width: String(width || '').trim(),
         height: String(height || '').trim(),
-        score: scoreImage(resolved, source, width, height),
+        score,
       });
+      return;
+    }
+
+    const current = candidates.get(resolved);
+    if (score > current.score) {
+      current.source = source;
+      current.width = String(width || '').trim();
+      current.height = String(height || '').trim();
+      current.score = score;
+    }
+    if (!current.alt && alt) {
+      current.alt = String(alt).trim();
+    }
+  };
+
+  const pushKnownUrl = (rawUrl, source, alt = '', width = '', height = '') => {
+    for (const variant of normalizeTextVariants(rawUrl)) {
+      pushResolved(variant, source, alt, width, height);
+      for (const embeddedUrl of extractNestedImageUrls(variant)) {
+        pushResolved(embeddedUrl, 'embedded', alt, width, height);
+      }
+    }
+  };
+
+  const pushTextUrls = (text, source, alt = '', width = '', height = '') => {
+    for (const imageUrl of extractImageReferencesFromText(text)) {
+      pushResolved(imageUrl, source, alt, width, height);
+      for (const embeddedUrl of extractNestedImageUrls(imageUrl)) {
+        pushResolved(embeddedUrl, 'embedded', alt, width, height);
+      }
     }
   };
 
   $('meta[property="og:image"], meta[property="og:image:url"], meta[name="twitter:image"], meta[name="twitter:image:src"]').each(
     (_, element) => {
-      push($(element).attr('content'), 'meta');
+      pushKnownUrl($(element).attr('content'), 'meta');
     },
   );
 
@@ -421,12 +454,12 @@ function collectImageCandidates(html, pageUrl) {
     const height = image.attr('height') || image.attr('data-height') || '';
 
     for (const attr of ['src', 'data-src', 'data-original', 'data-lazy-src', 'data-actualsrc', 'data-img-url', 'data-image']) {
-      push(image.attr(attr), 'img', alt, width, height);
+      pushKnownUrl(image.attr(attr), 'img', alt, width, height);
     }
 
     for (const attr of ['srcset', 'data-srcset', 'data-lazy-srcset']) {
       for (const srcsetUrl of parseSrcset(image.attr(attr))) {
-        push(srcsetUrl, 'srcset', alt, width, height);
+        pushKnownUrl(srcsetUrl, 'srcset', alt, width, height);
       }
     }
   });
@@ -435,22 +468,51 @@ function collectImageCandidates(html, pageUrl) {
     const source = $(element);
     for (const attr of ['srcset', 'data-srcset']) {
       for (const srcsetUrl of parseSrcset(source.attr(attr))) {
-        push(srcsetUrl, 'source');
+        pushKnownUrl(srcsetUrl, 'source');
       }
     }
   });
 
   $('link[rel="image_src"], link[as="image"], link[rel="preload"][as="image"]').each((_, element) => {
-    push($(element).attr('href'), 'link');
+    pushKnownUrl($(element).attr('href'), 'link');
   });
 
   $('[style]').each((_, element) => {
-    const style = $(element).attr('style') || '';
-    const matches = style.matchAll(/url\((['"]?)(.*?)\1\)/gi);
-    for (const match of matches) {
-      push(match[2], 'background');
+    pushTextUrls($(element).attr('style') || '', 'background');
+  });
+
+  $('*').each((_, element) => {
+    const attributes = element.attribs || {};
+
+    for (const [name, value] of Object.entries(attributes)) {
+      if (!value) {
+        continue;
+      }
+
+      const lowerName = name.toLowerCase();
+      if (lowerName.includes('srcset')) {
+        for (const srcsetUrl of parseSrcset(value)) {
+          pushKnownUrl(srcsetUrl, 'srcset');
+        }
+      }
+
+      if (/(src|href|url|image|img|poster|thumb|background|data)/i.test(lowerName)) {
+        pushKnownUrl(value, 'attribute');
+      }
+
+      pushTextUrls(value, 'attribute');
     }
   });
+
+  $('script').each((_, element) => {
+    pushTextUrls($(element).html() || $(element).text() || '', 'script');
+  });
+
+  $('style').each((_, element) => {
+    pushTextUrls($(element).html() || $(element).text() || '', 'style');
+  });
+
+  pushTextUrls(html, 'markup');
 
   return [...candidates.values()].sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
 }
@@ -493,6 +555,142 @@ function parseSrcset(value) {
     .filter(Boolean);
 }
 
+function extractImageReferencesFromText(text) {
+  const found = new Set();
+
+  for (const variant of normalizeTextVariants(text)) {
+    const cssMatches = variant.matchAll(/url\(\s*(['"]?)(.*?)\1\s*\)/gi);
+    for (const match of cssMatches) {
+      const imageUrl = cleanPossibleImageUrl(match[2]);
+      if (imageUrl) {
+        found.add(imageUrl);
+      }
+    }
+
+    const absoluteMatches = variant.matchAll(/(?:https?:)?\/\/[^\s"'`<>\\)]+?\.(?:jpe?g|png|webp|avif|gif|svg)(?:[^\s"'`<>\\)]*)?/gi);
+    for (const match of absoluteMatches) {
+      const imageUrl = cleanPossibleImageUrl(match[0]);
+      if (imageUrl) {
+        found.add(imageUrl);
+      }
+    }
+
+    const relativeMatches = variant.matchAll(/(?:\.{0,2}\/)?[a-z0-9_~@:%+./-]+?\.(?:jpe?g|png|webp|avif|gif|svg)(?:\?[^"'`<>\s\\)]*)?/gi);
+    for (const match of relativeMatches) {
+      if (isInsideAbsoluteUrl(variant, match.index || 0)) {
+        continue;
+      }
+
+      const imageUrl = cleanPossibleImageUrl(match[0]);
+      if (imageUrl && !imageUrl.includes('://')) {
+        found.add(imageUrl);
+      }
+    }
+  }
+
+  return [...found];
+}
+
+function isInsideAbsoluteUrl(text, index) {
+  if (index > 0 && text[index - 1] === '\\') {
+    return true;
+  }
+
+  const prefix = text.slice(0, index);
+  const lastDelimiter = Math.max(
+    prefix.lastIndexOf(' '),
+    prefix.lastIndexOf('\n'),
+    prefix.lastIndexOf('\t'),
+    prefix.lastIndexOf('"'),
+    prefix.lastIndexOf("'"),
+    prefix.lastIndexOf('`'),
+    prefix.lastIndexOf('<'),
+    prefix.lastIndexOf('>'),
+    prefix.lastIndexOf('('),
+    prefix.lastIndexOf(')'),
+    prefix.lastIndexOf('\\'),
+  );
+  const currentToken = prefix.slice(lastDelimiter + 1);
+
+  return /^(?:https?:)?\/\//i.test(currentToken);
+}
+
+function normalizeTextVariants(value) {
+  if (!value) {
+    return [];
+  }
+
+  const raw = String(value).trim();
+  if (!raw) {
+    return [];
+  }
+
+  const variants = new Set([raw]);
+  const htmlDecoded = decodeCommonHtmlEntities(raw);
+  variants.add(htmlDecoded);
+
+  for (const text of [...variants]) {
+    variants.add(
+      text
+        .replace(/\\\//g, '/')
+        .replace(/\\u002[fF]/g, '/')
+        .replace(/\\u003[aA]/g, ':')
+        .replace(/\\u0026/g, '&')
+        .replace(/\\u003[dD]/g, '=')
+        .replace(/\\u003[fF]/g, '?'),
+    );
+  }
+
+  return [...variants].filter(Boolean);
+}
+
+function extractNestedImageUrls(rawUrl) {
+  const nested = new Set();
+
+  for (const variant of normalizeTextVariants(rawUrl)) {
+    let url;
+    try {
+      url = new URL(variant, 'https://placeholder.local/');
+    } catch {
+      continue;
+    }
+
+    for (const value of url.searchParams.values()) {
+      for (const nestedVariant of normalizeTextVariants(value)) {
+        if (/\.(?:jpe?g|png|webp|avif|gif|svg)(?:[?#]|$)/i.test(nestedVariant)) {
+          nested.add(nestedVariant);
+        }
+
+        for (const imageUrl of extractImageReferencesFromText(nestedVariant)) {
+          nested.add(imageUrl);
+        }
+      }
+    }
+  }
+
+  return [...nested];
+}
+
+function cleanPossibleImageUrl(value) {
+  return decodeCommonHtmlEntities(String(value || ''))
+    .trim()
+    .replace(/^['"`]+|['"`]+$/g, '')
+    .replace(/[.,;]+$/g, '');
+}
+
+function decodeCommonHtmlEntities(value) {
+  return String(value)
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#34;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&#x2f;/gi, '/')
+    .replace(/&#47;/g, '/');
+}
+
 function scoreImage(url, source, width, height) {
   let score = 0;
   const lower = url.toLowerCase();
@@ -501,9 +699,12 @@ function scoreImage(url, source, width, height) {
 
   if (source === 'meta') score += 60;
   if (source === 'img' || source === 'srcset') score += 40;
+  if (source === 'source' || source === 'link') score += 35;
   if (source === 'background') score += 20;
-  if (/\.(jpe?g|png|webp|avif)(\?|$)/.test(lower)) score += 20;
-  if (/\.(gif|svg)(\?|$)/.test(lower)) score += 8;
+  if (source === 'attribute' || source === 'embedded') score += 18;
+  if (source === 'script' || source === 'style' || source === 'markup') score += 10;
+  if (/\.(jpe?g|png|webp|avif)([?#]|$)/.test(lower)) score += 20;
+  if (/\.(gif|svg)([?#]|$)/.test(lower)) score += 8;
   if (Number.isFinite(numericWidth) && numericWidth >= 300) score += 15;
   if (Number.isFinite(numericHeight) && numericHeight >= 300) score += 15;
   if (/(icon|sprite|logo|avatar|tracking|pixel|spacer)/.test(lower)) score -= 30;
@@ -641,11 +842,16 @@ function extensionFromContentType(contentType) {
 function sourceLabel(source) {
   const labels = {
     background: '背景',
+    attribute: '屬性',
+    embedded: '內嵌',
     img: '圖片',
     link: '連結',
     meta: '預覽',
+    markup: '標記',
+    script: '腳本',
     source: '來源',
     srcset: '響應式',
+    style: '樣式',
   };
   return labels[source] || source;
 }
@@ -670,3 +876,5 @@ function escapeHtml(value) {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 }
+
+export { collectImageCandidates, extractImageReferencesFromText, resolveImageUrl };
