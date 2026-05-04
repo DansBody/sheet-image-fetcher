@@ -1142,6 +1142,23 @@ function renderSelectionPage(pageUrl, candidates, browserState = {}) {
   const targetGalleryJpgCount = candidates.filter((candidate) => candidate.targetGalleryJpg).length;
   const serialJpgCount = candidates.filter((candidate) => candidate.serialJpg).length;
   const browserStatus = renderBrowserStatus(pageUrl, browserState);
+  const targetCandidates = candidates.filter((c) => c.targetGalleryJpg);
+  const otherCandidates = candidates.filter((c) => !c.targetGalleryJpg);
+
+  const renderCard = (candidate, index) => `
+    <label class="image-card" data-serial-jpg="${candidate.serialJpg ? 'true' : 'false'}" data-target-gallery-jpg="${candidate.targetGalleryJpg ? 'true' : 'false'}">
+      <input type="checkbox" name="images" value="${escapeHtml(candidate.url)}">
+      <span class="thumb">
+        <img loading="lazy" src="/proxy?url=${encodeURIComponent(candidate.url)}&ref=${encodeURIComponent(pageUrl)}" alt="${escapeHtml(candidate.alt || '圖片預覽')}">
+      </span>
+      <span class="meta">
+        <span class="source">${escapeHtml(candidate.targetGalleryJpg ? '目標圖片' : candidate.serialJpg ? '序號 JPG' : sourceLabel(candidate.source))}</span>
+        <span class="index">#${(candidate.serialJpg || candidate.targetGalleryJpg) && candidate.serialNumber != null ? candidate.serialNumber : index + 1}</span>
+      </span>
+      <span class="url" title="${escapeHtml(candidate.url)}">${escapeHtml(trimUrl(candidate.url))}</span>
+    </label>
+  `;
+
   const candidateMarkup =
     candidates.length === 0
       ? `<div class="empty">沒有找到可下載的圖片候選。這個頁面可能由 JavaScript 動態載入圖片，或圖片來源被網站阻擋。</div>`
@@ -1165,24 +1182,16 @@ function renderSelectionPage(pageUrl, candidates, browserState = {}) {
           <input type="hidden" name="pageUrl" value="${escapeHtml(pageUrl)}">
           <div class="filter-empty is-hidden" data-filter-empty>目前篩選沒有符合的圖片。這表示目標圖片 URL 沒有被後端從這個頁面的 HTML / script / style 中抓到。</div>
           <div class="grid">
-            ${candidates
-              .map(
-                (candidate, index) => `
-                  <label class="image-card" data-serial-jpg="${candidate.serialJpg ? 'true' : 'false'}" data-target-gallery-jpg="${candidate.targetGalleryJpg ? 'true' : 'false'}">
-                    <input type="checkbox" name="images" value="${escapeHtml(candidate.url)}">
-                    <span class="thumb">
-                      <img loading="lazy" src="/proxy?url=${encodeURIComponent(candidate.url)}&ref=${encodeURIComponent(pageUrl)}" alt="${escapeHtml(candidate.alt || '圖片預覽')}">
-                    </span>
-                    <span class="meta">
-                      <span class="source">${escapeHtml(candidate.targetGalleryJpg ? '目標圖片' : candidate.serialJpg ? '序號 JPG' : sourceLabel(candidate.source))}</span>
-                      <span class="index">#${(candidate.serialJpg || candidate.targetGalleryJpg) && candidate.serialNumber != null ? candidate.serialNumber : index + 1}</span>
-                    </span>
-                    <span class="url" title="${escapeHtml(candidate.url)}">${escapeHtml(trimUrl(candidate.url))}</span>
-                  </label>
-                `,
-              )
-              .join('')}
+            ${targetCandidates.map((c, i) => renderCard(c, i)).join('')}
           </div>
+          ${otherCandidates.length > 0 ? `
+            <details class="other-images">
+              <summary>其他圖片（${otherCandidates.length} 張）</summary>
+              <div class="grid">
+                ${otherCandidates.map((c, i) => renderCard(c, targetCandidates.length + i)).join('')}
+              </div>
+            </details>
+          ` : ''}
           <div class="sticky-actions">
             <button type="submit">下載勾選圖片 ZIP</button>
           </div>

@@ -286,6 +286,27 @@ h1 {
   overflow-wrap: anywhere;
 }
 
+.other-images {
+  margin-top: 20px;
+}
+
+.other-images summary {
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.92rem;
+  font-weight: 800;
+  padding: 10px 0;
+  user-select: none;
+}
+
+.other-images summary:hover {
+  color: var(--ink);
+}
+
+.other-images .grid {
+  margin-top: 12px;
+}
+
 .sticky-actions {
   background: rgba(246, 247, 244, 0.92);
   border-top: 1px solid var(--line);
