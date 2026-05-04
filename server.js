@@ -24,6 +24,7 @@ const MAX_IMAGE_BYTES = numberFromEnv('MAX_IMAGE_BYTES', 15 * 1024 * 1024);
 const MAX_TOTAL_BYTES = numberFromEnv('MAX_TOTAL_BYTES', 150 * 1024 * 1024);
 const REQUEST_TIMEOUT_MS = numberFromEnv('REQUEST_TIMEOUT_MS', 15_000);
 const BROWSER_FETCH_ENABLED = process.env.BROWSER_FETCH_ENABLED !== 'false';
+const BROWSER_FETCH_DEFAULT = process.env.BROWSER_FETCH_DEFAULT !== 'false';
 const BROWSER_NAVIGATION_TIMEOUT_MS = numberFromEnv('BROWSER_NAVIGATION_TIMEOUT_MS', 30_000);
 const BROWSER_SCROLL_STEPS = numberFromEnv('BROWSER_SCROLL_STEPS', 10);
 const BROWSER_SCROLL_WAIT_MS = numberFromEnv('BROWSER_SCROLL_WAIT_MS', 700);
@@ -60,6 +61,7 @@ app.get('/', (req, res) => {
           <label for="url">網頁 URL</label>
           <div class="url-row">
             <input id="url" name="url" type="url" inputmode="url" autocomplete="url" placeholder="https://example.com/page" required>
+            <input type="hidden" name="browser" value="1">
             <button type="submit">搜尋圖片</button>
           </div>
         </form>
@@ -70,7 +72,7 @@ app.get('/', (req, res) => {
 
 app.get('/select', async (req, res) => {
   const inputUrl = String(req.query.url || '').trim();
-  const forceBrowser = String(req.query.browser || '') === '1';
+  const browserMode = getBrowserMode(req.query.browser);
 
   try {
     const pageUrl = await normalizeAndCheckUrl(inputUrl, '網頁 URL');
@@ -82,7 +84,7 @@ app.get('/select', async (req, res) => {
     let browserError = '';
     let capturedByBrowser = 0;
 
-    if (shouldUseBrowserFetch(candidates, forceBrowser)) {
+    if (shouldUseBrowserFetch(candidates, browserMode)) {
       browserAttempted = true;
 
       try {
@@ -106,9 +108,9 @@ app.get('/select', async (req, res) => {
           browserAttempted,
           browserEnabled: BROWSER_FETCH_ENABLED,
           browserError,
+          browserMode,
           browserUsed,
           capturedByBrowser,
-          forceBrowser,
         }),
       }),
     );
@@ -270,13 +272,28 @@ async function fetchHtml(url) {
   };
 }
 
-function shouldUseBrowserFetch(candidates, forceBrowser) {
+function getBrowserMode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === '0' || normalized === 'false' || normalized === 'html') {
+    return 'html';
+  }
+  if (normalized === '1' || normalized === 'true' || normalized === 'browser') {
+    return 'browser';
+  }
+  return BROWSER_FETCH_DEFAULT ? 'browser' : 'auto';
+}
+
+function shouldUseBrowserFetch(candidates, browserMode) {
   if (!BROWSER_FETCH_ENABLED) {
     return false;
   }
 
-  if (forceBrowser) {
+  if (browserMode === 'browser') {
     return true;
+  }
+
+  if (browserMode === 'html') {
+    return false;
   }
 
   return !candidates.some((candidate) => candidate.targetGalleryJpg || candidate.serialJpg);
@@ -1123,7 +1140,7 @@ function renderSelectionPage(pageUrl, candidates, browserState = {}) {
 
 function renderBrowserStatus(pageUrl, browserState) {
   const browserUrl = `/select?url=${encodeURIComponent(pageUrl)}&browser=1`;
-  const staticUrl = `/select?url=${encodeURIComponent(pageUrl)}`;
+  const staticUrl = `/select?url=${encodeURIComponent(pageUrl)}&browser=0`;
 
   if (browserState.browserUsed) {
     return `
@@ -1164,7 +1181,7 @@ function renderBrowserStatus(pageUrl, browserState) {
     <section class="mode-status">
       <div>
         <strong>HTML 模式</strong>
-        <span>如果頁面需要往下捲動才載入圖片，可以改用瀏覽器模式重新擷取。</span>
+        <span>${browserState.browserMode === 'html' ? '目前已手動改用 HTML 模式。' : '如果頁面需要往下捲動才載入圖片，可以改用瀏覽器模式重新擷取。'}</span>
       </div>
       <a href="${browserUrl}">用瀏覽器模式重新抓取</a>
     </section>

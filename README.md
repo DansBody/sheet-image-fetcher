@@ -28,7 +28,7 @@ http://localhost:3000
 1. 把這個專案推到 GitHub。
 2. 到 Render 建立新的 Web Service，連到該 repo。
 3. Render 會讀取 `render.yaml`：
-   - Build Command: `npm install && npx playwright install --with-deps --only-shell chromium`
+   - Build Command: `npm install && npx playwright install --only-shell chromium`
    - Start Command: `npm start`
    - Plan: Free
 4. 部署完成後會得到一個像這樣的網址：
@@ -51,12 +51,18 @@ https://sheet-image-fetcher.onrender.com
 https://你的-render-網址/select?url=URL編碼後的剪貼簿
 ```
 
-使用時先複製網頁 URL，再執行捷徑，就會開啟選圖頁。
+使用時先複製網頁 URL，再執行捷徑，就會開啟選圖頁。沒有帶 `browser` 參數時，預設會使用瀏覽器模式。
 
-如果某個頁面需要捲動後才載入圖片，可以強制使用瀏覽器模式：
+也可以明確指定瀏覽器模式：
 
 ```text
 https://你的-render-網址/select?url=URL編碼後的剪貼簿&browser=1
+```
+
+如果想暫時改回只抓初始 HTML：
+
+```text
+https://你的-render-網址/select?url=URL編碼後的剪貼簿&browser=0
 ```
 
 ## 預設限制
@@ -71,6 +77,7 @@ https://你的-render-網址/select?url=URL編碼後的剪貼簿&browser=1
 | `MAX_TOTAL_BYTES` | `157286400` | 單次 ZIP 最大總量，預設 150 MB |
 | `REQUEST_TIMEOUT_MS` | `15000` | 遠端請求逾時 |
 | `BROWSER_FETCH_ENABLED` | `true` | 是否啟用 Playwright 瀏覽器擷取模式 |
+| `BROWSER_FETCH_DEFAULT` | `true` | 沒有指定 `browser` 參數時，是否預設使用瀏覽器模式 |
 | `BROWSER_NAVIGATION_TIMEOUT_MS` | `30000` | 瀏覽器開頁逾時 |
 | `BROWSER_SCROLL_STEPS` | `10` | 瀏覽器模式往下捲動次數 |
 | `BROWSER_SCROLL_WAIT_MS` | `700` | 每次捲動後等待毫秒數 |
