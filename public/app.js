@@ -62,7 +62,8 @@ window.addEventListener('pageshow', (event) => {
 }());
 
 // ── Filter & selection ───────────────────────
-let activeFilter = 'all';
+const activeChip = document.querySelector('.filter-chip.is-active');
+let activeFilter = activeChip ? (activeChip.dataset.filter || 'all') : 'all';
 
 document.addEventListener('DOMContentLoaded', () => {
   applyFilter();

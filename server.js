@@ -1167,6 +1167,7 @@ function renderSelectionPage(pageUrl, candidates, browserState = {}) {
   const targetGalleryJpgCount = candidates.filter((candidate) => candidate.targetGalleryJpg).length;
   const serialJpgCount = candidates.filter((candidate) => candidate.serialJpg).length;
   const browserStatus = renderBrowserStatus(pageUrl, browserState);
+  const initialFilter = targetGalleryJpgCount > 0 ? 'target' : 'all';
 
   const sorted = [...candidates].sort((a, b) => {
     if (a.serialNumber != null && b.serialNumber != null) return a.serialNumber - b.serialNumber;
@@ -1204,17 +1205,17 @@ function renderSelectionPage(pageUrl, candidates, browserState = {}) {
       ? `<div class="empty-state">No downloadable images found on this page. The page may load images dynamically with JavaScript, or the source site may be blocking access.</div>`
       : `
         <div class="filter-bar" role="toolbar" aria-label="Filter images">
-          <button class="filter-chip" type="button" data-filter="all" aria-pressed="true">
+          <button class="filter-chip${initialFilter === 'all' ? ' is-active' : ''}" type="button" data-filter="all" aria-pressed="${initialFilter === 'all'}">
             All <span class="chip-count">${candidates.length}</span>
           </button>
-          <button class="filter-chip" type="button" data-filter="target">
+          <button class="filter-chip${initialFilter === 'target' ? ' is-active' : ''}" type="button" data-filter="target" aria-pressed="${initialFilter === 'target'}">
             Target Images <span class="chip-count">${targetGalleryJpgCount}</span>
           </button>
-          <button class="filter-chip" type="button" data-filter="serial">
+          <button class="filter-chip" type="button" data-filter="serial" aria-pressed="false">
             Original JPG <span class="chip-count">${serialJpgCount}</span>
           </button>
           <div class="filter-sep" role="separator"></div>
-          <button class="filter-chip" type="button" data-filter="checked">
+          <button class="filter-chip" type="button" data-filter="checked" aria-pressed="false">
             Selected <span class="chip-count chip-selected-count">0</span>
           </button>
         </div>
