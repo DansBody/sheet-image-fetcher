@@ -24,7 +24,7 @@ const MAX_IMAGE_BYTES = numberFromEnv('MAX_IMAGE_BYTES', 15 * 1024 * 1024);
 const MAX_TOTAL_BYTES = numberFromEnv('MAX_TOTAL_BYTES', 150 * 1024 * 1024);
 const REQUEST_TIMEOUT_MS = numberFromEnv('REQUEST_TIMEOUT_MS', 15_000);
 const BROWSER_FETCH_ENABLED = process.env.BROWSER_FETCH_ENABLED !== 'false';
-const BROWSER_FETCH_DEFAULT = process.env.BROWSER_FETCH_DEFAULT !== 'false';
+const BROWSER_FETCH_DEFAULT = process.env.BROWSER_FETCH_DEFAULT === 'true';
 const BROWSER_NAVIGATION_TIMEOUT_MS = numberFromEnv('BROWSER_NAVIGATION_TIMEOUT_MS', 30_000);
 const BROWSER_SCROLL_STEPS = numberFromEnv('BROWSER_SCROLL_STEPS', 10);
 const BROWSER_SCROLL_WAIT_MS = numberFromEnv('BROWSER_SCROLL_WAIT_MS', 700);
@@ -279,7 +279,7 @@ function getBrowserMode(value) {
   if (normalized === '1' || normalized === 'true' || normalized === 'browser') {
     return 'browser';
   }
-  return BROWSER_FETCH_DEFAULT ? 'browser' : 'auto';
+  return BROWSER_FETCH_DEFAULT ? 'auto' : 'html';
 }
 
 function shouldUseBrowserFetch(candidates, browserMode) {
