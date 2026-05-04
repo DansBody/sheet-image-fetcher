@@ -872,6 +872,11 @@ function collectImageCandidates(html, pageUrl) {
 
   pushTextUrls(html, 'markup');
 
+  for (const match of html.matchAll(/contentUrl:\s*"([^"]+)"/g)) {
+    const derived = match[1].replace('/pages/', '/images/').replace('.jsonp', '.jpg');
+    pushResolved(derived, 'scribd');
+  }
+
   return [...candidates.values()].sort((a, b) => b.score - a.score || a.url.localeCompare(b.url));
 }
 
@@ -1085,6 +1090,7 @@ function scoreImage(url, source, width, height) {
   const numericWidth = Number(String(width).replace(/[^\d.]/g, ''));
   const numericHeight = Number(String(height).replace(/[^\d.]/g, ''));
 
+  if (source === 'scribd') score += 70;
   if (source === 'meta') score += 60;
   if (source === 'img' || source === 'srcset') score += 40;
   if (source === 'source' || source === 'link') score += 35;
@@ -1310,6 +1316,7 @@ function extensionFromContentType(contentType) {
 
 function sourceLabel(source) {
   const labels = {
+    scribd: 'Scribd',
     background: '背景',
     attribute: '屬性',
     embedded: '內嵌',
