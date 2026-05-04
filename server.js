@@ -61,7 +61,6 @@ app.get('/', (req, res) => {
           <label for="url">網頁 URL</label>
           <div class="url-row">
             <input id="url" name="url" type="url" inputmode="url" autocomplete="url" placeholder="https://example.com/page" required>
-            <input type="hidden" name="browser" value="1">
             <button type="submit">搜尋圖片</button>
           </div>
         </form>
