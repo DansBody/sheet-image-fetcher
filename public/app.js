@@ -38,6 +38,7 @@ function applyFilter() {
     const checkbox = card.querySelector('input[name="images"]');
     const visible =
       activeFilter === 'all' ||
+      (activeFilter === 'target' && card.dataset.targetGalleryJpg === 'true') ||
       (activeFilter === 'serial' && card.dataset.serialJpg === 'true') ||
       (activeFilter === 'checked' && checkbox?.checked);
 

@@ -407,6 +407,7 @@ function collectImageCandidates(html, pageUrl) {
         width: String(width || '').trim(),
         height: String(height || '').trim(),
         serialJpg: isSerialJpgUrl(resolved),
+        targetGalleryJpg: isTargetGalleryJpgUrl(resolved),
         score,
       });
       return;
@@ -707,6 +708,7 @@ function scoreImage(url, source, width, height) {
   if (/\.(jpe?g|png|webp|avif)([?#]|$)/.test(lower)) score += 20;
   if (/\.(gif|svg)([?#]|$)/.test(lower)) score += 8;
   if (isSerialJpgUrl(url)) score += 50;
+  if (isTargetGalleryJpgUrl(url)) score += 35;
   if (Number.isFinite(numericWidth) && numericWidth >= 300) score += 15;
   if (Number.isFinite(numericHeight) && numericHeight >= 300) score += 15;
   if (/(icon|sprite|logo|avatar|tracking|pixel|spacer)/.test(lower)) score -= 30;
@@ -724,7 +726,18 @@ function isSerialJpgUrl(value) {
   }
 }
 
+function isTargetGalleryJpgUrl(value) {
+  try {
+    const url = new URL(value);
+    const pathname = decodeURIComponent(url.pathname);
+    return /\/images\/\d{1,4}-[a-z0-9]+\.jpe?g$/i.test(pathname);
+  } catch {
+    return false;
+  }
+}
+
 function renderSelectionPage(pageUrl, candidates) {
+  const targetGalleryJpgCount = candidates.filter((candidate) => candidate.targetGalleryJpg).length;
   const serialJpgCount = candidates.filter((candidate) => candidate.serialJpg).length;
   const candidateMarkup =
     candidates.length === 0
@@ -733,10 +746,11 @@ function renderSelectionPage(pageUrl, candidates) {
         <div class="toolbar">
           <div>
             <strong>${candidates.length}</strong> 張候選圖片
-            <span class="muted">序號 JPG ${serialJpgCount} 張。最多顯示 ${MAX_CANDIDATES} 張，一次最多下載 ${MAX_SELECTED} 張。</span>
+            <span class="muted">目標圖片 ${targetGalleryJpgCount} 張，序號 JPG ${serialJpgCount} 張。最多顯示 ${MAX_CANDIDATES} 張，一次最多下載 ${MAX_SELECTED} 張。</span>
           </div>
           <div class="toolbar-actions">
             <button type="button" data-filter="all" aria-pressed="true">全部</button>
+            <button type="button" data-filter="target">只看目標圖片</button>
             <button type="button" data-filter="serial">只看序號 JPG</button>
             <button type="button" data-filter="checked">只看已勾選</button>
             <button type="button" data-select-all>全選</button>
@@ -750,13 +764,13 @@ function renderSelectionPage(pageUrl, candidates) {
             ${candidates
               .map(
                 (candidate, index) => `
-                  <label class="image-card" data-serial-jpg="${candidate.serialJpg ? 'true' : 'false'}">
+                  <label class="image-card" data-serial-jpg="${candidate.serialJpg ? 'true' : 'false'}" data-target-gallery-jpg="${candidate.targetGalleryJpg ? 'true' : 'false'}">
                     <input type="checkbox" name="images" value="${escapeHtml(candidate.url)}">
                     <span class="thumb">
                       <img loading="lazy" src="/proxy?url=${encodeURIComponent(candidate.url)}&ref=${encodeURIComponent(pageUrl)}" alt="${escapeHtml(candidate.alt || '圖片預覽')}">
                     </span>
                     <span class="meta">
-                      <span class="source">${escapeHtml(candidate.serialJpg ? '序號 JPG' : sourceLabel(candidate.source))}</span>
+                      <span class="source">${escapeHtml(candidate.targetGalleryJpg ? '目標圖片' : candidate.serialJpg ? '序號 JPG' : sourceLabel(candidate.source))}</span>
                       <span class="index">#${index + 1}</span>
                     </span>
                     <span class="url" title="${escapeHtml(candidate.url)}">${escapeHtml(trimUrl(candidate.url))}</span>
@@ -893,4 +907,4 @@ function escapeHtml(value) {
     .replaceAll("'", '&#39;');
 }
 
-export { collectImageCandidates, extractImageReferencesFromText, isSerialJpgUrl, resolveImageUrl };
+export { collectImageCandidates, extractImageReferencesFromText, isSerialJpgUrl, isTargetGalleryJpgUrl, resolveImageUrl };

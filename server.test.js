@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { collectImageCandidates, extractImageReferencesFromText, isSerialJpgUrl } from './server.js';
+import {
+  collectImageCandidates,
+  extractImageReferencesFromText,
+  isSerialJpgUrl,
+  isTargetGalleryJpgUrl,
+} from './server.js';
 
 test('extracts deeply nested image URLs from attributes, scripts, styles, and query params', () => {
   const html = `
@@ -47,13 +52,21 @@ test('detects serial jpg filenames used by gallery pages', () => {
   assert.equal(isSerialJpgUrl('https://cdn.example.com/gallery/24-5a4406f60e.png'), false);
 });
 
-test('marks and boosts serial jpg candidates', () => {
+test('detects target gallery jpg URLs under images directories', () => {
+  assert.equal(isTargetGalleryJpgUrl('https://html.test.com/8tehn2e3sw79xi4c/images/24-5a4406f60e.jpg'), true);
+  assert.equal(isTargetGalleryJpgUrl('https://html.test.com/8tehn2e3sw79xi4c/images/24-5a4406f60e.jpg?width=1200'), true);
+  assert.equal(isTargetGalleryJpgUrl('https://html.test.com/8tehn2e3sw79xi4c/assets/24-5a4406f60e.jpg'), false);
+  assert.equal(isTargetGalleryJpgUrl('https://html.test.com/8tehn2e3sw79xi4c/images/image-24.jpg'), false);
+});
+
+test('marks and boosts target gallery jpg candidates', () => {
   const html = `
     <img src="https://cdn.example.com/assets/logo.png">
-    <img src="https://cdn.example.com/gallery/24-5a4406f60e.jpg">
+    <img src="https://html.test.com/8tehn2e3sw79xi4c/images/24-5a4406f60e.jpg">
   `;
   const candidates = collectImageCandidates(html, 'https://example.com/');
 
-  assert.equal(candidates[0].url, 'https://cdn.example.com/gallery/24-5a4406f60e.jpg');
+  assert.equal(candidates[0].url, 'https://html.test.com/8tehn2e3sw79xi4c/images/24-5a4406f60e.jpg');
   assert.equal(candidates[0].serialJpg, true);
+  assert.equal(candidates[0].targetGalleryJpg, true);
 });
