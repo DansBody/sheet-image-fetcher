@@ -1168,11 +1168,15 @@ function renderSelectionPage(pageUrl, candidates, browserState = {}) {
   const serialJpgCount = candidates.filter((candidate) => candidate.serialJpg).length;
   const browserStatus = renderBrowserStatus(pageUrl, browserState);
 
+  const sorted = [...candidates].sort((a, b) => {
+    if (a.serialNumber != null && b.serialNumber != null) return a.serialNumber - b.serialNumber;
+    if (a.serialNumber != null) return -1;
+    if (b.serialNumber != null) return 1;
+    return 0;
+  });
+
   const renderCard = (candidate, index) => {
-    const displayNum =
-      (candidate.serialJpg || candidate.targetGalleryJpg) && candidate.serialNumber != null
-        ? candidate.serialNumber
-        : index + 1;
+    const displayNum = candidate.serialNumber != null ? candidate.serialNumber : index + 1;
     const fmt = getImageFormat(candidate.url);
     const dims = candidate.width && candidate.height ? `${candidate.width} × ${candidate.height}` : '';
     const metaParts = [dims, fmt].filter(Boolean).join(' · ');
@@ -1221,7 +1225,7 @@ function renderSelectionPage(pageUrl, candidates, browserState = {}) {
             No images match this filter.
           </div>
           <div class="grid">
-            ${candidates.map((c, i) => renderCard(c, i)).join('')}
+            ${sorted.map((c, i) => renderCard(c, i)).join('')}
           </div>
           <div class="sticky-bar">
             <div class="sticky-bar-info">
@@ -1345,10 +1349,8 @@ function imageRequestHeaders(referrer) {
   };
 }
 
-function buildZipName(pageUrl) {
-  const { hostname } = new URL(pageUrl);
-  const host = hostname.replace(/[^a-z0-9.-]+/gi, '-').replace(/^-+|-+$/g, '') || 'images';
-  return `${host}-images.zip`;
+function buildZipName(_pageUrl) {
+  return 'sheet_image.zip';
 }
 
 function buildImageName(index, imageUrl, contentType) {
