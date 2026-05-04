@@ -11,6 +11,7 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
+const ASSET_VERSION = encodeURIComponent(String(process.env.RENDER_GIT_COMMIT || Date.now()).slice(0, 12));
 
 const USER_AGENT =
   process.env.FETCH_USER_AGENT ||
@@ -26,7 +27,16 @@ const ALLOW_PRIVATE_URLS = process.env.ALLOW_PRIVATE_URLS === 'true';
 
 app.disable('x-powered-by');
 app.use(express.urlencoded({ extended: false, limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h' }));
+app.use(
+  express.static(path.join(__dirname, 'public'), {
+    maxAge: '0',
+    setHeaders(res, filePath) {
+      if (/\.(css|js)$/i.test(filePath)) {
+        res.setHeader('cache-control', 'no-cache');
+      }
+    },
+  }),
+);
 
 app.get('/', (req, res) => {
   res.type('html').send(
@@ -745,7 +755,7 @@ function renderSelectionPage(pageUrl, candidates) {
       : `
         <div class="toolbar">
           <div>
-            <strong>${candidates.length}</strong> 張候選圖片
+            <strong data-visible-count>${candidates.length}</strong> / ${candidates.length} 張候選圖片
             <span class="muted">目標圖片 ${targetGalleryJpgCount} 張，序號 JPG ${serialJpgCount} 張。最多顯示 ${MAX_CANDIDATES} 張，一次最多下載 ${MAX_SELECTED} 張。</span>
           </div>
           <div class="toolbar-actions">
@@ -760,6 +770,7 @@ function renderSelectionPage(pageUrl, candidates) {
 
         <form method="post" action="/download">
           <input type="hidden" name="pageUrl" value="${escapeHtml(pageUrl)}">
+          <div class="filter-empty is-hidden" data-filter-empty>目前篩選沒有符合的圖片。這表示目標圖片 URL 沒有被後端從這個頁面的 HTML / script / style 中抓到。</div>
           <div class="grid">
             ${candidates
               .map(
@@ -813,8 +824,8 @@ function renderPage({ title, body }) {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>${escapeHtml(title)}</title>
-  <link rel="stylesheet" href="/styles.css">
-  <script defer src="/app.js"></script>
+  <link rel="stylesheet" href="/styles.css?v=${ASSET_VERSION}">
+  <script defer src="/app.js?v=${ASSET_VERSION}"></script>
 </head>
 <body>
   <main class="shell">
