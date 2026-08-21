@@ -10,6 +10,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "build": "node scripts/build-worker.mjs",
+    "postinstall": "npm run build",
     "worker:dev": "npm run build && wrangler dev",
     "deploy": "npm run build && wrangler deploy",
     "check": "node --check server.js && node --check scripts/build-worker.mjs",
